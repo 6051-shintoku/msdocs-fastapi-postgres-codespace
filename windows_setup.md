@@ -229,15 +229,190 @@ pip install 新しいパッケージ名
 
 ### データベース接続エラーが発生する場合
 
-1. コンテナが正常に起動していることを確認：
+**重要**: コンテナ内部からはDockerコマンドは使用できません。以下の方法で確認してください：
+
+#### コンテナ内部からの確認方法：
+
+1. PostgreSQLサーバーへの接続テスト：
 ```bash
-docker ps
+# 接続確認
+psql -h localhost -U admin -d postgres -c "SELECT 1;"
+
+# エラーが出る場合は接続詳細を確認
+psql -h localhost -U admin -d postgres -c "SELECT version();" 2>&1
 ```
 
-2. データベースのログを確認：
+2. ネットワーク接続の確認：
 ```bash
-docker compose logs db
+# PostgreSQLポート（5432）の確認
+netstat -tlnp | grep 5432
+
+# 名前解決の確認  
+nslookup localhost
+ping -c 3 localhost
 ```
+
+3. 環境設定の確認：
+```bash
+# .envファイルの内容確認
+cat .env
+
+# 環境変数の読み込みと確認（bashの場合）
+source .env
+echo "DBHOST: $DBHOST"
+echo "DBUSER: $DBUSER" 
+echo "DBNAME: $DBNAME"
+
+# 直接値を確認
+grep DBHOST .env
+grep DBUSER .env
+```
+
+#### ホストマシン（Windows）からの確認方法：
+
+1. **Docker Desktop**でコンテナの状態を確認
+   - Docker Desktopのダッシュボードで`msdocs-fastapi-postgres-codespace`関連のコンテナを確認
+   - 通常、`app`と`db`の2つのコンテナが動作しているはず
+
+2. VS Codeの**ターミナル**で新しいターミナルを開いて再接続テスト
+
+3. Dev Containerを完全に再起動：
+   - VS Codeで `リモート接続を閉じる`
+   - プロジェクトフォルダを再度開く
+
+#### よくあるエラーと解決方法：
+
+**エラー例1**: `psql: error: connection to server at "localhost" (127.0.0.1), port 5432 failed`
+```bash
+# 解決方法：PostgreSQLコンテナの確認
+netstat -tlnp | grep 5432  # ポートが開いているか確認
+```
+
+**エラー例2**: `psql: error: FATAL: password authentication failed`  
+```bash
+# 解決方法：認証情報の確認
+cat .env | grep DBPASS  # パスワードが正しいか確認
+```
+
+**エラー例3**: `psql: error: FATAL: database "postgres" does not exist`
+```bash  
+# 解決方法：データベース名の確認
+psql -h localhost -U admin -l  # 利用可能なデータベース一覧
+```
+
+## Dev Container環境での終了・再起動プロセス
+
+### 正常な終了手順
+
+#### 1. FastAPIアプリケーションの停止
+アプリケーションが動作している場合は、ターミナルで `Ctrl+C` で停止
+
+#### 2. VS Codeからの終了
+- **方法1**: `リモート接続を閉じる` → `終了`
+- **方法2**: VS Codeを直接閉じる
+
+⚠️ **重要**: Dev Containerを閉じても、**データベースのデータは保持**されます
+
+### 再起動手順
+
+#### 1. プロジェクトフォルダを開く
+- `フォルダを開く` → プロジェクトフォルダを選択
+- Dev Containerが自動的に起動します
+
+#### 2. 環境の確認
+```bash
+# PostgreSQLサーバーの確認（自動起動済み）
+psql -h localhost -U admin -d postgres -c "\dt;"
+
+# データの保持確認
+psql -h localhost -U admin -d postgres -c "SELECT * FROM restaurants LIMIT 5;"
+```
+
+#### 3. FastAPIアプリケーションの再起動
+```bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### データの永続化について
+
+Dev Container環境では以下が**自動的に保持**されます：
+- **データベース内のデータ** - PostgreSQLのデータファイルはボリュームマウントで永続化
+- **プロジェクトファイル** - ローカルフォルダがマウントされているため変更も保持
+- **環境設定** - `.env`ファイルや各種設定
+
+**一から再構築が必要な場合のみ**：
+- インストールしたPythonパッケージ（pip installしたもの）
+- システムレベルでの設定変更
+
+### 開発作業の再開時のチェックリスト
+
+1. ✅ PostgreSQLサーバー: 自動起動済み
+2. ✅ データベーステーブル: 保持済み
+3. ✅ データ: 保持済み  
+4. ✅ Pythonパッケージ: requirements.txtベースで自動インストール済み
+5. 🔄 **手動必要**: FastAPIアプリケーションの起動のみ
+
+## Dev Container環境の構造理解
+
+### なぜ `docker ps` が使えないのか？
+
+**重要**: 現在あなたは**コンテナ内部**で作業しています！
+
+```
+ホストマシン(Windows)
+└── Docker Desktop
+    ├── Dev Container (app) ← 現在ここで作業中
+    │   ├── Python 3.11環境
+    │   ├── VS Code Server  
+    │   └── あなたのターミナル
+    └── PostgreSQL Container (db)
+        └── PostgreSQL 18サーバー
+```
+
+**重要**: これは**マルチコンテナ構成**です。開発用コンテナとデータベース用コンテナが分離されています。
+
+#### 環境の確認方法
+```bash
+# 現在の環境確認
+whoami          # → vscode
+hostname        # → ランダムなコンテナID (例: c73b14b088f4)
+cat /etc/os-release | head -3  # → Debian GNU/Linux 13 (trixie)
+
+# Dockerコマンドは使えない（コンテナ内部のため）
+docker ps       # → bash: docker: command not found
+```
+
+#### コンテナの管理
+
+**コンテナ内から**はDockerコマンドを使えません。コンテナ管理はホストマシン（Windows）側で行います：
+
+- **VS Codeの「リモート接続を閉じる」**: コンテナを停止
+- **「フォルダを開く」**: コンテナを再起動
+- **Docker Desktop**: コンテナの状態を確認可能
+
+#### 環境の動作確認方法
+
+```bash
+# 1. データベース接続確認（別コンテナのPostgreSQLへ）
+psql -h localhost -U admin -d postgres -c "SELECT version();"
+
+# 2. 現在のコンテナ内プロセス確認
+ps aux | grep python      # FastAPIアプリプロセス確認（起動時のみ）
+
+# 3. ネットワーク接続確認  
+netstat -tlnp | grep 5432  # PostgreSQLポート確認
+netstat -tlnp | grep 8000  # FastAPIポート確認（起動時のみ）
+
+# 4. 利用可能なサービス確認
+service --status-all
+```
+
+#### なぜこの構成なのか？
+
+- **開発環境の分離**: アプリケーションコードとデータベースを独立管理
+- **リソース効率**: 各コンテナが必要最小限のリソースのみ使用  
+- **ポータビリティ**: 同じ構成を任意の環境で再現可能
+- **セキュリティ**: コンテナ間のネットワーク分離
 
 ## Dev Containers環境のメリット
 
